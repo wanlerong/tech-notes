@@ -4,9 +4,11 @@
 
 主要：
 - [tcp 协议标准](https://datatracker.ietf.org/doc/html/rfc9293)
+- 书籍：计算机网络-自顶向下方法
 
 次要：
 - [详解](https://www.xiaolincoding.com/network/3_tcp/tcp_interview.html#tcp-%E8%BF%9E%E6%8E%A5%E5%BB%BA%E7%AB%8B)
+
 
 
 ## 常见题
