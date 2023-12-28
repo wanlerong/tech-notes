@@ -83,6 +83,8 @@ next-key锁
 间隙锁和行锁的结合，可以防止幻行
 next-key locks是一个索引记录锁，并在索引记录之前的间隙上加上一个gap锁。
 
+两个事务的间隙锁之间是相互兼容的，不会产生冲突。
+
 
 意向锁：
 意向锁是表级锁. 为了支持多粒度锁定，允许行锁和表锁共存。
@@ -105,6 +107,8 @@ next-key locks是一个索引记录锁，并在索引记录之前的间隙上加
 insert intention lock是插入行之前设置的一种gap lock。这个锁发信号通知插入意图，以通知插入到相同gap中的多个事务，如果没有插入gap中相同位置时不需要等待对方。	
 可以防止并发插入同一个id的情况。
 
+插入意向锁 会被间隙锁阻塞
+
 自增锁 AUTO-INC Locks
 AUTO-INC 锁是一个特殊的表级锁。如果一个事务正在向表中插入值，则任何其他插入的事务都必须等待他插入到该表中。
 这样才可以得到连续的主键值。
@@ -112,6 +116,31 @@ AUTO-INC 锁是一个特殊的表级锁。如果一个事务正在向表中插�
 
 D: durability
 数据的持久化
+
+
+死锁
+https://www.xiaolincoding.com/mysql/lock/deadlock.html
+https://www.xiaolincoding.com/mysql/lock/show_lock.html
+
+设置事务等待锁的超时时间。当一个事务的等待时间超过该值后，就对这个事务进行回滚，于是锁就释放了，另一个事务就可以继续执行了。在 InnoDB 中，参数 innodb_lock_wait_timeout 是用来设置超时时间的，默认值时 50 秒。
+
+当发生超时后，就出现下面这个提示：
+
+开启主动死锁检测。主动死锁检测在发现死锁后，主动回滚死锁链条中的某一个事务，让其他事务得以继续执行。
+将参数 innodb_deadlock_detect 设置为 on，表示开启这个逻辑，默认就开启。
+
+当检测到死锁后，就会出现下面这个提示：
+
+上面这个两种策略是「当有死锁发生时」的避免方式
+
+查看加了什么锁：
+select * from performance_schema.data_locks\G;
+
+通过 LOCK_MODE 可以确认是 next-key 锁，还是间隙锁，还是记录锁：
+如果 LOCK_MODE 为 X，说明是 next-key 锁；
+如果 LOCK_MODE 为 X, REC_NOT_GAP，说明是记录锁；
+如果 LOCK_MODE 为 X, GAP，说明是间隙锁；
+
 
 ## 表结构设计
 尽可能的小，比如枚举用 tinyint
@@ -123,6 +152,21 @@ D: durability
 ## 索引设计，查询优化
 
 http://www.notedeep.com/page/344
+
+
+### 自适应哈希索引
+
+InnoDB存储引擎会监控对表上各索引页的查询。并建立合适的哈希索引，加速数据页的访问。
+
+特点
+哈希索引，查询消耗 O(1)
+降低对二级索引树的频繁访问资源。
+自适应
+
+缺点
+hash自适应索引会占用innodb buffer pool；
+自适应hash索引只适合搜索等值的查询，如select * from table where index_col='xxx'，而对于其他查找类型，如范围查找，是不能使用的；
+
 
 ### b+ 树 
 
@@ -166,18 +210,82 @@ mysql 中的 B+ 树
 
 ## 参数调优
 
+连接参数优化：
+对于mysql服务器最大连接数值的设置范围比较理想的是：
+Max_used_connections / max_connections  在10%以上
+如果在10%以下，说明mysql服务器的max_connections设置过高
+
+max_connections 受限于 mysql 能打开的文件描述符数量 open-files-limit
+ini/cnf 参数: open-files-limit。
+
+设置的过高也会有问题，如果在 200 个连接的时候，mysql的iops / cpu 已经打满了。那即使加到1000，也只会有更多的阻塞的链接被建立，会徒增内存和cpu的压力，每个链接都需要资源，会雪上加霜
 
 ## 分区表
+方式：范围分区，哈希分区，列表分区
+
+优点：
+Partitioning makes it possible to store more data in one table than can be held on a single disk or file system partition.
+
+Data that loses its usefulness can often be easily removed from a partitioned table by dropping the partition (or partitions) containing only that data. 
+
+Some queries can be greatly optimized in virtue of the fact that data satisfying a given WHERE clause can be stored only on one or more partitions, which automatically excludes any remaining partitions from the search.
+
+缺点
+
+用于分区的字段，需要包含在每一个唯一索引里，包括主键
+
+分区表设计时，务必明白你的查询条件都带有分区字段，否则会扫描所有分区的数据或索引
+
+
+在什么场景中会适合用分区呢？
+
+- 业务简单，单表查询，且都会带上分区字段
+- 数据需要定期清理，无需保留全部分区
+
 
 ## 分库分表，垂直拆分，水平拆分，读写分离
 
+库的垂直切分，就是划分应用的不同模块。不同模块之间解耦，从业务上看，一个服务的查询只查一个模块。这样不同的模块可以存储在独立的mysql实例中。
+
+表的垂直切分，就是把访问不频繁，字段不耦合的那些字段，根据一些原则拆分到多个表里去。
+
+表的水平切分，通过取模，hash，或者范围划分，将数据路由到相应的子表里。
+
+
+分库之后可能会引入分布式事务的问题
+可以让各个数据库解决自身的事务，然后程序来控制多个数据库上的事务。
+
+跨节点join，排序，分页的问题
+
+
 ## 高可用，分布式扩展
+
+
 
 ## 复制、备份与恢复
 
+## 乐观锁 悲观锁
 
-# 其他
+http://www.notedeep.com/page/1231
 
-## 查询缓存
+乐观锁
+乐观锁（Optimistic Locking）认为对同一数据的并发操作不会总发生，属于小概率事件，不用每次都对数据上锁，也就是不采用数据库自身的锁机制，而是通过程序来实现。在程序上，我们可以采用版本号机制或者时间戳机制实现。
+
+乐观锁的版本号机制
+在表中设计一个版本字段 version，第一次读的时候，会获取 version 字段的取值。然后对数据进行更新或删除操作时，会执行UPDATE ... SET version=version+1 WHERE version=version。此时如果已经有事务对这条数据进行了更改，修改就不会成功。
+乐观锁的时间戳机制
+时间戳和版本号机制一样，也是在更新提交的时候，将当前数据的时间戳和更新之前取得的时间戳进行比较，如果两者一致则更新成功，否则就是版本冲突。
+
+
+悲观锁
+悲观锁（Pessimistic Locking）也是一种思想，对数据被其他事务的修改持保守态度，会通过数据库自身的锁机制来实现，从而保证数据操作的排它性。
+
+避免等待时间过长，可以把等待锁的超时时间改短到1秒 innodb_lock_wait_timeout=1（默认是50秒）
+innodb_thread_concurrency    在InnoDB存储引擎层做“限流”
+
+适用场景
+
+乐观锁适合读操作多的场景，相对来说写的操作比较少。它的优点在于程序实现，不存在死锁问题，不过适用场景也会相对乐观，因为它阻止不了除了程序以外的数据库操作。
+悲观锁适合写操作多的场景，因为写的操作具有排它性。
 
 
