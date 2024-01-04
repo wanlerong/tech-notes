@@ -22,6 +22,7 @@ A: atomicity.
 事务是原子化的单元，要么都成功 commit，要么都失败 rollback
 
 C: consistency.
+一致性是只数据本身是一致的，不会说积分扣了，东西没到账。
 主要指 processing to protect data from crashes.
 如：InnoDB doublewrite buffer 一个脏页有16k，而文件系统的写入最小io单位可能是4k或者1k，就意味着可能写到一半发生断电之类的，会导致磁盘脏数据。就不一致了。（为了确保整页写入）
 The InnoDB double write buffer helps recover from half-written pages. Whenever InnoDB flushes a page from the buffer pool, it is first written to the double write buffer. Only if the buffer is safely flushed to the disk, will InnoDB write the pages to the disk. So that when InnoDB detects the corruption from the mismatch of the checksum, it can recover from double write buffer.
@@ -34,6 +35,13 @@ redo log是在崩溃恢复期间使用。
 
 默认情况下，重做日志在物理上表现为一组名为ib_logfile0和ib_logfile1的文件。
 [redo log](http://www.notedeep.com/page/222)
+
+
+
+undo log
+实现事务回滚，保障事务的原子性。事务处理过程中，如果出现了错误或者用户执 行了 ROLLBACK 语句，MySQL 可以利用 undo log 中的历史数据将数据恢复到事务开始之前的状态。
+实现 MVCC（多版本并发控制）关键因素之一。MVCC 是通过 ReadView + undo log 实现的。undo log 为每条记录保存多份历史数据，MySQL 在执行快照读（普通 select 语句）的时候，会根据事务的 Read View 里的信息，顺着 undo log 的版本链找到满足其可见性的记录。
+
 
 I:: isolation.
 http://www.notedeep.com/page/232
