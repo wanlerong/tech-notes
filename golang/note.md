@@ -2,6 +2,7 @@
 
 主要：
 - [The Go Programming Language Specification](https://go.dev/ref/spec)
+- go.dev
 
 次要：
 - [Go 程序员面试笔试宝典](https://golang.design/go-questions/)
@@ -9,13 +10,254 @@
 
 # 基础原理
 
+# slice
+
+runtime.slice
+type slice struct {
+	array unsafe.Pointer
+	len   int
+	cap   int
+}
+
+底层是一个指向数组的指针
+
+## slice 扩容
+
+扩容逻辑：
+需要的容量如果 > 2倍，则新容量 = 需要的容量
+
+以 256 为界限
+如果之前小于 256，则 容量 * 2
+否则 容量 * 1.25 + （0.75 * 256），让过渡更加平滑，如果容量为 257 则，基本相当于还是翻倍。
+
+```
+newcap := old.cap
+doublecap := newcap + newcap
+if cap > doublecap {
+	newcap = cap
+} else {
+	const threshold = 256
+	if old.cap < threshold {
+		newcap = doublecap
+	} else {
+		// Check 0 < newcap to detect overflow
+		// and prevent an infinite loop.
+		for 0 < newcap && newcap < cap {
+			// Transition from growing 2x for small slices
+			// to growing 1.25x for large slices. This formula
+			// gives a smooth-ish transition between the two.
+			newcap += (newcap + 3*threshold) / 4
+		}
+		// Set newcap to the requested cap when
+		// the newcap calculation overflowed.
+		if newcap <= 0 {
+			newcap = cap
+		}
+	}
+}
+```
+
+# map
+
+使用链表解决哈希冲突。
+
+```
+// A header for a Go map.
+type hmap struct {
+	count     int // # live cells == size of map.  Must be first (used by len() builtin)
+	flags     uint8
+	B         uint8  // log_2 of # of buckets (can hold up to loadFactor * 2^B items)
+	noverflow uint16 // approximate number of overflow buckets; see incrnoverflow for details
+	hash0     uint32 // hash seed
+
+	buckets    unsafe.Pointer // array of 2^B Buckets. may be nil if count==0.
+	oldbuckets unsafe.Pointer // previous bucket array of half the size, non-nil only when growing
+	nevacuate  uintptr        // progress counter for evacuation (buckets less than this have been evacuated)
+
+	extra *mapextra // optional fields
+}
+```
+buckets 指向 bmap（A bucket）
+
+bmap 就是一个 bucket，每个 bucket 设计成最多只能放 8 个 key-value 对（哈希冲突的 8 个）
+
+type bmap struct {
+    topbits  [8]uint8
+    keys     [8]keytype
+    values   [8]valuetype
+    pad      uintptr
+    overflow uintptr
+}
+
+![图](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20240117-004400.png)
+
+
+
+![图](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20240117-004839.png)
+
+
+// 可能有迭代器使用 buckets
+iterator     = 1
+// 可能有迭代器使用 oldbuckets
+oldIterator  = 2
+// 有协程正在向 map 中写入 key
+hashWriting  = 4
+// 等量扩容（对应条件 2）
+sameSizeGrow = 8
+
+
+
+value和value贴紧可以省内存空间，如int8类型的value，可以节省额外 padding 7 个字节。
+
+## key 的定位
+
+key 经过哈希计算后得到哈希值，共 64 个 bit 位（64位机，32位机就不讨论了，现在主流都是64位机），计算它到底要落在哪个桶时，只会用到最后 B 个 bit 位。还记得前面提到过的 B 吗？如果 B = 5，那么桶的数量，也就是 buckets 数组的长度是 2^5 = 32。
+
+例如，现在有一个 key 经过哈希函数计算后，得到的哈希结果是：
+
+10010111 | 000011110110110010001111001010100010010110010101010 │ 01010
+
+在桶内，又会根据 key 计算出来的 hash 值的高 8 位来决定 key 到底落入桶内的哪个位置（一个桶内最多有8个位置）。
+
+
+插入时，如果哈希冲突：在 bucket 中，从前往后找到第一个空位。
+在查找某个 key 时，先找到对应的桶，再去遍历 bucket 中的 tophash。tophash 下 key 冲突，会直接比较 key
+
+
+![图](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20240117-010144.png)
+
+
+作为 map 的 key，除开 slice，map，functions 这三种不可比较的类型，其他类型都是 OK 的。
+
+## 扩容过程
+
+loadFactor := count / (2^B)
+
+扩容时机：
+1、装载因子超过阈值，源码里定义的阈值是 6.5。
+2、overflow 的 bucket 数量过多：当 B 小于 15，也就是 bucket 总数 2^B 小于 2^15 时，如果 overflow 的 bucket 数量超过 2^B；当 B >= 15，也就是 bucket 总数 2^B 大于等于 2^15，如果 overflow 的 bucket 数量超过 2^15。
+
+对于 1，元素太多了，采用两倍扩容，buckets数量翻倍，即 B++
+对于 2，空隙太多，等量扩容，使得排列更紧密
+
+
+因此 Go map 的扩容采取了一种称为“渐进式”地方式，原有的 key 并不会一次性搬迁完毕，每次最多只会搬迁 2 个 bucket。
+
+分配好了新的 buckets，并将老的 buckets 挂到了 oldbuckets 字段上。
+
+nevacuate 表示搬迁进度，小于这个的都表示搬迁完毕
+
+如果 oldbuckets 不为空，说明还没有搬迁完毕，还得继续搬。
+
+![图](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20240117-012656.png)
+
+## concurrent-map
+
+就是将一个大 map 拆分成若干个小 map，然后用若干个小 mutex 对这些小 map 进行保护。
+这样，通过降低锁的粒度提升并发程度。
+
+## sync.map
+
+type Map struct {
+	mu Mutex //互斥锁，用于锁定dirty map
+
+	// 可以安全并发访问，除了第一次 store 和 undelete 时需要持有 mu，此时需要 copy 到 dirty
+	read atomic.Value // readOnly
+
+	// 需要持有 mu
+	// 为了确保脏映射可以快速提升为读映射，它还包括读映射中所有未删除的条目。
+	// 删除的条目不会存储在脏映射中。
+
+	dirty map[any]*entry
+
+	// 统计访问read没有未命中然后穿透访问dirty的次数
+	// 若miss等于dirty的长度，dirty会提升成read
+ 	misses int
+}
+
+使用场景：
+只写入一次，但是读取很多次，像只会增长的缓存
+(1) when the entry for a given key is only ever written once but read many times, as in caches that only grow, or
+
+多个 goroutines 读写各自的key集合，不相交时。
+(2) when multiple goroutines read, write, and overwrite entries for disjoint sets of keys. In these two cases, use of a Map may significantly reduce lock contention compared to a Go map paired with a separate Mutex or RWMutex.
+
+
+## sync.Mutex
+提供互斥锁, one goroutine at a time can access 
+
+```
+// SafeCounter is safe to use concurrently.
+type SafeCounter struct {
+	mu sync.Mutex
+	v  map[string]int
+}
+
+// Inc increments the counter for the given key.
+func (c *SafeCounter) Inc(key string) {
+	c.mu.Lock()
+	// Lock so only one goroutine at a time can access the map c.v.
+	c.v[key]++
+	c.mu.Unlock()
+}
+```
+
+# channel
+底层数据结构需要看源码，版本为 go 1.9.2：
+
+```
+type hchan struct {
+	// chan 里元素数量
+	qcount   uint
+	// chan 底层循环数组的长度
+	dataqsiz uint
+	// 指向底层循环数组的指针
+	// 只针对有缓冲的 channel
+	buf      unsafe.Pointer
+	// chan 中元素大小
+	elemsize uint16
+	// chan 是否被关闭的标志
+	closed   uint32
+	// chan 中元素类型
+	elemtype *_type // element type
+	// 已发送元素在循环数组中的索引
+	sendx    uint   // send index
+	// 已接收元素在循环数组中的索引
+	recvx    uint   // receive index
+	// 等待接收的 goroutine 队列
+	recvq    waitq  // list of recv waiters
+	// 等待发送的 goroutine 队列
+	sendq    waitq  // list of send waiters
+
+	// 保护 hchan 中所有字段
+	lock mutex
+}
+```
+关于字段的含义都写在注释里了，再来重点说几个字段：
+
+buf 指向底层循环数组，只有缓冲型的 channel 才有。
+
+sendx，recvx 均指向底层循环数组，表示当前可以发送和接收的元素位置索引值（相对于底层数组）。
+
+sendq，recvq 分别表示被阻塞的 goroutine，这些 goroutine 由于尝试读取 channel 或向 channel 发送数据而被阻塞。
+
+waitq 是 sudog 的一个双向链表，而 sudog 实际上是对 goroutine 的一个封装
+
+
+```
+type waitq struct {
+	first *sudog
+	last  *sudog
+}
+```
+
+WX20240117-023211
+
 
 # 调度器
-
 goroutine 和线程的区别
 
 操作系统对goroutine是无感知的，操作系统执行的依然是线程/进程。是 Runtime 维护所有的 goroutines，并通过 scheduler 来进行调度。
-
 
 内存占用：创建一个 goroutine 的栈内存消耗为 2 KB，实际运行过程中，如果栈空间不够用，会自动进行扩容。创建一个 thread 则需要消耗 1 MB 栈内存。
 
@@ -458,8 +700,41 @@ Pool 池里面的元素个数你无法知道；
 先提前分配好足够的内存，再慢慢地填充，也是一种减少内存分配、复用内存形式的一种表现。
 
 
+## GOROOT
+表示 Go 的安装根目录，也就是 Go 的安装路径。如果你是从官方网站下载 Go 安装包进行安装，那么 GOROOT 的默认值为 /usr/local/go
 
 
+## GOPATH
+表示工作目录，解决 import 那些标准库之外的库，也会存放 install 编译出的可执行文件，和保存 go get 缓存下来的模块
+The Go path is a list of directory trees containing Go source code. It is consulted to resolve imports that cannot be found in the standard Go tree. The default path is the value of the GOPATH environment variable
+
+The src/ directory holds source code. The path below 'src' determines the import path or executable name.
+The pkg/ directory holds installed package objects. 
+The bin/ directory holds compiled commands. 
+
+Go development using dependencies beyond the standard library is done using Go modules. When using Go modules, the GOPATH variable (which defaults to $HOME/go on Unix and %USERPROFILE%\go on Windows) is used for the following purposes:
+
+The go install command installs binaries to $GOBIN, which defaults to $GOPATH/bin.
+The go get command caches downloaded modules in $GOMODCACHE, which defaults to $GOPATH/pkg/mod.
+The go get command caches downloaded checksum database state in $GOPATH/pkg/sumdb.
+
+# 真题：
+
+make 和 new 的区别？
+
+The make built-in function allocates and initializes an object of type slice, map, or chan (only). Like new, the first argument is a type, not a value. Unlike new, make's return type is the same as the type of its argument, not a pointer to it. The specification of the result depends on the type:
+
+make 分配内存和初始化对象，只作用于 slice，map，和chan。和new 一样第一个参数传 type。
+和 new 不一样的是，返回的结果就是 type 类型的，而 new 返回的是指向 type 类型的指针。
+
+make 底层对应的是三个方法，make 可以指定 size
+OMAKESLICE 返回的是 slice 结构体
+OMAKEMAP 返回的是 runtime.hmap 结构体的指针
+OMAKECHAN 返回的是 runtime.hchan 结构体的指针
+
+
+new 也是 allocates memory. 但是可以传任意的 type，但是不能指定 size。
+the value returned is a pointer to a newly allocated zero value of that type.
 
 
 
