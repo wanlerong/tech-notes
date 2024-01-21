@@ -1,5 +1,7 @@
 # 监控指标：
 
+## 如何监控系统中的这些指标，并且排查问题，debug。？
+
 Response Time:
 Monitor the average response time for API endpoints or services. 
 
@@ -17,6 +19,12 @@ QPS 请求吞吐量：
 数据库性能：
 iops 每秒的IO，跟踪数据库响应时间、查询执行时间和连接池利用率
 慢查询
+
+数据库连接数：
+记得是 2000
+
+iops是：8000
+
 
 网络延迟：
 测量不同组件或服务之间的网络延迟。 高延迟会影响整体系统性能。

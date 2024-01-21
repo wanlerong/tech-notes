@@ -26,7 +26,9 @@ C: consistency.
 主要指 processing to protect data from crashes.
 如：InnoDB doublewrite buffer 一个脏页有16k，而文件系统的写入最小io单位可能是4k或者1k，就意味着可能写到一半发生断电之类的，会导致磁盘脏数据。就不一致了。（为了确保整页写入）
 The InnoDB double write buffer helps recover from half-written pages. Whenever InnoDB flushes a page from the buffer pool, it is first written to the double write buffer. Only if the buffer is safely flushed to the disk, will InnoDB write the pages to the disk. So that when InnoDB detects the corruption from the mismatch of the checksum, it can recover from double write buffer.
-![InnoDB doublewrite buffer](https://images2017.cnblogs.com/blog/1113510/201707/1113510-20170726195345906-321682602.png)
+
+![InnoDB doublewrite buffer](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20240119-192418.png)
+
 
 InnoDB crash recovery
 redo log是在崩溃恢复期间使用。
@@ -97,7 +99,7 @@ next-key locks是一个索引记录锁，并在索引记录之前的间隙上加
 意向锁：
 意向锁是表级锁. 为了支持多粒度锁定，允许行锁和表锁共存。
 
-![兼容性](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20231227-231056.png)
+![图](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20231227-231056.png)
 图中的锁兼容性是针对表级锁的。（例如，一个表级 IX 锁与另一个表级 IX 锁兼容）
 
 要获取行级 X 锁，需要先获取表级的意向锁（如表 IX 锁）
@@ -215,6 +217,160 @@ mysql 中的 B+ 树
 
 因为索引页不需要存数据，一页可以存更多的索引值, 所以 B+ 树可以比 B树 "更矮胖"。
 
+
+## 物理层级
+
+系统表空间在 ibdata1 中，里面有 双写缓冲，rollback seg，UNDO SPACE
+
+如果开启了 innodb_file_per_table,则每一个表都会有 ibd file
+
+![图](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20240119-213008.png)
+
+tablespace 表空间，包含了多个 segment
+segment 包含了一个或多个 extents
+extent 为 1MB，有 64 个 page
+page 是 16 kb
+
+
+
+在表中数据量大的时候，为某个索引分配空间的时候就不再按照页为单位分配了，而是按照区（extent）为单位分配。每个区的大小为 1MB，对于 16KB 的页来说，连续的 64 个页会被划为一个区，这样就使得链表中相邻的页的物理位置也相邻，就能使用顺序 I/O 了。
+
+
+
+## 每个 page 的结构
+
+https://blog.jcole.us/2013/01/07/the-physical-structure-of-innodb-index-pages/
+
+特指 FIL_PAGE_INDEX 类型的 page 
+
+（一个索引就是一个B树（聚簇或二级），一个节点是一个page）
+
+![图](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20240119-214402.png)
+
+1、file_header/file_trailer: 
+里面存了 page_type, page_type 包含常见的：
+FIL_PAGE_INDEX 即： B-tree node，B+树（leaf，non-leaf page）
+FIL_PAGE_SDI 即：Tablespace SDI Index page 表结构元数据信息
+FIL_PAGE_UNDO_LOG 即：Undo log page 
+还存了，上一页和下一页的指针，会指向同一层级的上一页和下一页
+
+2、INDEX header: 
+包含了很多索引信息
+Index ID: 该page所属的Index的ID
+Format Flag: 在这个page 里的 records的格式，有COMPACT和REDUNDANT
+Page Direction: 该page正在经历的插入的方向，LEFT（不断插入更小的值），Right（不断插入更大的值，自增），NO_DIRECTION（随机的插入
+Number of Inserts in Page Direction: 在这个方向上插入的records数量
+level，在 b树中的层级
+
+3、FSEG header:
+只有 b+ 树的根节点的 page 才是有效的信息，包含了指向 这个 INDEX 所属文件 segment 的指针。
+每个 INDEX 有一个 segment 为叶子节点页面的，另一个 segment 为非叶子节点页面的。
+
+4 System records: infimum and supremum. 
+InnoDB has two system records in each page called infimum and supremum. 
+该 page 中的最小和最大 record，可以通过 bytes offset 直接访问到。
+
+5 User records:
+实际的数据。
+
+6、The page directory:
+是该 page 上的 records 的目录，包含了很多个指针，指向该 page 上的 records（每 4 到 8 条记录就会有一个 slot）
+
+## 每行的结构
+https://xiaolincoding.com/mysql/base/row_format.html
+https://blog.jcole.us/2013/01/10/the-physical-structure-of-records-in-innodb/
+
+
+Redundant 不是一种紧凑的行格式，基本不用了
+
+默认都是 Compact 类型。
+
+![图](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20240119-232637.png)
+
+
+变长字段长度列表：
+varchar这些，
+该record中的那些变长的字段，它们的数据占用的大小存起来，存到「变长字段长度列表」里面
+
+NULL 值列表：
+bitmap，一个 bit 表示，一个 field 是否为 null
+
+
+当一条记录有 9 个字段都是可为 NULL，那么就会创建 2 字节空间的「NULL 值列表」
+
+
+变长字段长度列表和NULL 值列表的顺序，和field顺序都是相反的。
+主要是因为「record header」中指向下一个记录的指针，指向的是下一条记录的「record header」和「真实数据」之间的位置，这样的好处是向左读就是记录头信息，向右读就是真实数据，比较方便。
+可以使得位置靠前的记录的真实数据和数据对应的字段长度信息可以同时在一个 CPU Cache Line 中，这样就可以提高 CPU Cache 的命中率。
+
+
+record header：
+delete_mask ：标识此条数据是否被删除。从这里可以知道，我们执行 detele 删除记录的时候，并不会真正的删除记录，只是将这个记录的 delete_mask 标记为 1。
+next_record：下一条记录的位置。从这里可以知道，记录与记录之间是通过链表组织的。
+在前面我也提到了，指向的是下一条记录的「记录头信息」和「真实数据」之间的位置，这样的好处是向左读就是记录头信息，向右读就是真实数据，比较方便。
+record_type：表示当前记录的类型，0表示普通记录，1表示B+树非叶子节点记录，2表示最小记录，3表示最大记录
+
+
+记录中的真实数据部分。
+row_id
+如果我们建表的时候指定了主键或者唯一约束列，那么就没有 row_id 隐藏字段了。如果既没有指定主键，又没有唯一约束，那么 InnoDB 就会为记录添加 row_id 隐藏字段。row_id不是必需的，占用 6 个字节。
+
+trx_id
+事务id，表示这个数据是由哪个事务生成的。 trx_id是必需的，占用 6 个字节。
+
+roll_pointer
+这条记录上一个版本的指针。roll_pointer 是必需的，占用 7 个字节。
+
+
+每个列的值
+
+
+## varchar(n) 中 n 最大取值为多少？
+
+所有的列占用的字节长度加起来不能超过 65535 个字节。
+
+在算 varchar(n) 中 n 最大值时，需要用 65535 减去 「变长字段长度列表」和 「NULL 值列表」所占用的字节数的。
+
+假设等于 65532，再考虑字符串编码，在 UTF-8 字符集下，一个字符最多需要三个字节，varchar(n) 的 n 最大取值就是 65532/3 = 21844。
+
+
+## 如果一个 page 存不了一条记录，即单条记录大于 16 KB
+
+InnoDB 存储引擎会自动将溢出的数据存放到「溢出页」中。
+
+Compact 行格式针对行溢出的处理是这样的：当发生行溢出时，在记录的真实数据处只会保存该列的一部分数据，而把剩余的数据放在「溢出页」中。
+然后真实数据处用 20 字节存储指向溢出页的地址，从而可以找到剩余数据所在的页。
+
+
+## 自增主键的好处
+
+如果我们使用自增主键，那么每次插入的新数据就会按顺序添加到当前索引节点的位置，不需要移动已有的数据，当页面写满，就会自动开辟一个新页面。因为每次插入一条新记录，都是追加操作，不需要重新移动数据，因此这种插入数据的方法效率非常高。
+
+如果我们使用非自增主键，由于每次插入主键的索引值都是随机的，因此每次插入新的数据时，就可能会插入到现有数据页中间的某个位置，这将不得不移动其它数据来满足新数据的插入，甚至需要从一个页面复制数据到另外一个页面，我们通常将这种情况称为页分裂。
+
+
+
+## explain 执行计划
+
+possible_keys 字段表示可能用到的索引；
+key 字段表示实际用的索引，如果这一项为 NULL，说明没有使用索引；
+key_len 表示索引的长度；
+rows 表示扫描的数据行数。（只是统计值）
+type 表示数据扫描类型，我们需要重点看这个。
+type 字段就是描述了找到所需数据时使用的扫描方式是什么，常见扫描类型的执行效率从低到高的顺序为：
+
+All（全表扫描）；坏
+index（全索引扫描）；坏
+range（索引范围扫描）；用了 where 子句中使用 < 、>、in、between 等，还行
+ref（非唯一索引扫描）；
+eq_ref（唯一索引扫描）；
+const（结果只有一条的主键或唯一索引扫描）。
+
+
+extra信息：
+Using filesort ：当查询语句中包含 group by 操作，而且无法利用索引完成排序操作的时候， 这时不得不选择相应的排序算法进行，甚至可能会通过文件排序，效率是很低的，所以要避免这种问题的出现。
+Using temporary：使了用临时表保存中间结果，MySQL 在对查询结果排序时使用临时表，常见于排序 order by 和分组查询 group by。效率低，要避免这种问题的出现。
+Using index：所需数据只需在索引即可全部获得，不须要再到表中取数据，也就是使用了覆盖索引，避免了回表操作，效率不错。
 
 ## 参数调优
 
