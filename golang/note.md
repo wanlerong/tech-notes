@@ -81,6 +81,7 @@ buckets 指向 bmap（A bucket）
 
 bmap 就是一个 bucket，每个 bucket 设计成最多只能放 8 个 key-value 对（哈希冲突的 8 个）
 
+```
 type bmap struct {
     topbits  [8]uint8
     keys     [8]keytype
@@ -88,6 +89,7 @@ type bmap struct {
     pad      uintptr
     overflow uintptr
 }
+```
 
 ![图](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20240117-004400.png)
 
@@ -202,6 +204,14 @@ func (c *SafeCounter) Inc(key string) {
 }
 ```
 
+sync.RWMutex
+
+读可共享，读写互斥
+lock := &sync.RWMutex{}
+Lock，Unlock，Rlock，RUnlock 方法
+
+
+
 # channel
 底层数据结构需要看源码，版本为 go 1.9.2：
 
@@ -251,7 +261,7 @@ type waitq struct {
 }
 ```
 
-WX20240117-023211
+![图](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20240117-023211.png)
 
 
 # 调度器
