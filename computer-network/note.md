@@ -11,7 +11,7 @@
 
 ## packet 交换机的时延（路由器的）
 
-WX20240121-223720
+![图](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20240121-223720.png)
 
 处理时延：
 检查分组首部（如checksum）和决定将该分组导向何处所需要的时间是处理时延的一部分。微秒级
@@ -26,13 +26,13 @@ WX20240121-223720
 光纤就是光速
 
 ## 分层
+![图](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20240121-224826.png)
 
-WX20240121-224826
 
 ## DNS
 基于 UDP
+![图](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20240121-233310.png)
 
-WX20240121-233310
 
 ## CDN
 
@@ -44,8 +44,8 @@ WX20240121-233310
 
 
 大多数CDN利用DNS来截获和重定向请求；
+![图](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20240121-234008.png)
 
-WX20240121-234008
 
 ## OSI 七层
 应用层
@@ -76,8 +76,8 @@ ssl 将数据加密后，再往传输层传递。
 无需建立连接
 分组首部开销小。每个TCP报文段都有 20 字节的首部开销，而UDP仅有8字节
 的开销。
+![图](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20240122-003438.png)
 
-WX20240122-003438
 
 发送方的UDP对报文段中的所有16比特字的和进行反码运算, 求和时遇到的任何溢出都被回卷。
 接收方也做求和，如果数据是正确的，那么和 checksum 相加后应该是 1111111111111111，16个1。
@@ -116,7 +116,8 @@ while True:
 
 
 ### 回退N步，GBN 协议
-WX20240122-004217
+![图](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20240122-004217.png)
+
 
 如果出现超时，发送方重传所有已发送但还未被确认过的分组。
 
