@@ -122,7 +122,6 @@ dp[i][j] = min(dp[i][j-1], min(dp[i-1][j-1], dp[i-1][j])) + 1
 并且，对于最后一次循环，初始结构都会是 l=m， r=l+1。
 因为进循环的条件是, 所以可以根据最后的一次界限变更得到最终的范围，一般都会是 l==r， 或者 l > r 然后break。break 后是最终的界限。
 
-
 ```
 for l < r {
     ...
@@ -131,7 +130,6 @@ for l < r {
 
 
 搜索滚动过的数组
-
 
 
 ## 图论
@@ -214,4 +212,58 @@ func randSortArray(nums []int, l,r int) {
     randSortArray(nums, j + 1, r)
 }
 ```
+
+## 堆排序
+
+```
+
+func sortArray(nums []int) []int {
+    res := []int{}
+    heapfy(nums, len(nums))
+    
+    for {
+        sz := len(nums)
+        res = append(res, nums[0])
+        nums[0],nums[sz-1] = nums[sz-1],nums[0]
+        nums = nums[:sz-1]
+        if (sz <= 1) {
+            break
+        }
+        heapfy2(nums, sz-1, 0)
+    }
+
+    return res
+}
+
+func heapfy(nums []int, size int) {
+    for i:=size/2; i>=0; i-- {
+        heapfy2(nums, size, i)
+    }
+}
+
+func heapfy2(nums []int, size int, idx int) {
+    l,r := 2*idx+1, 2*idx+2
+
+    min := nums[idx]
+    minIdx := idx
+
+    if l < size && nums[l] < min {
+        min = nums[l]
+        minIdx = l
+    }
+    if r < size && nums[r] < min {
+        min = nums[r]
+        minIdx = r
+    }
+
+    if minIdx == idx {
+        return
+    } else {
+        nums[idx],nums[minIdx] = nums[minIdx],nums[idx]
+        heapfy2(nums, size, minIdx)
+    }
+}
+
+```
+
 
