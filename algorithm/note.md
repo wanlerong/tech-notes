@@ -7,6 +7,29 @@
 ## 总结
 
 
+## api
+
+### 排序
+自定义排：
+sort.Slice(slice, func(i, j int) bool {
+
+})
+
+正序排：
+sort.Ints(slice)
+
+
+移除头尾的某个字符
+strings.Trim(str, ch)
+str = strings.ToLower(str) 转小写
+
+rand.Intn(n) 随机返回 [0,n)
+
+已经开辟好的两个 slice
+copy(dst, src)
+
+
+
 ### 链表：
 思路：多指定几个 p0, p1, p2, p3
 

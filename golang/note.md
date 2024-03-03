@@ -905,6 +905,11 @@ atomic包提供了底层的原子性内存原语，这对于同步算法的实�
 
 
 ## mutex 互斥锁的实现原理
+In the terminology of the Go memory model, the n'th call to Unlock “synchronizes before” the m'th call to Lock for any n < m. A successful call to TryLock is equivalent to a call to Lock. A failed call to TryLock does not establish any “synchronizes before” relation at all.
+
+锁定的互斥锁不与特定的 goroutine 关联。 允许一个 Goroutine 锁定一个 Mutex，然后安排另一个 Goroutine 解锁它。
+
+
 
 Waiter 信息虽然也存在 state 中，其实并不代表状态。它表示阻塞等待锁的协程个数，协程解锁时根据此值来判断是否需要释放信号量。
 
