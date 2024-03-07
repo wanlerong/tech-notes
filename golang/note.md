@@ -100,13 +100,15 @@ type bmap struct {
 
 // 可能有迭代器使用 buckets
 iterator     = 1
+
 // 可能有迭代器使用 oldbuckets
 oldIterator  = 2
+
 // 有协程正在向 map 中写入 key
 hashWriting  = 4
+
 // 等量扩容（对应条件 2）
 sameSizeGrow = 8
-
 
 
 value和value贴紧可以省内存空间，如int8类型的value，可以节省额外 padding 7 个字节。
@@ -210,6 +212,17 @@ sync.RWMutex
 lock := &sync.RWMutex{}
 Lock，Unlock，Rlock，RUnlock 方法
 
+# interface
+
+
+编译器自动检测类型是否实现接口
+```
+// 检查 *myWriter 类型是否实现了 io.Writer 接口
+var _ io.Writer = (*myWriter)(nil)
+
+// 检查 myWriter 类型是否实现了 io.Writer 接口
+var _ io.Writer = myWriter{}
+```
 
 
 # channel
@@ -475,6 +488,7 @@ STW 可以是 Stop the World 的缩写，在这个过程中整个用户代码被
 
 可看执行日志：
 
+```
 对于用户代码向运行时申请内存产生的垃圾回收：
 gc 2 @0.001s 2%: 0.018+1.1+0.029 ms clock, 0.22+0.047/0.074/0.048+0.34 ms cpu, 4->7->3 MB, 5 MB goal, 12 P
 
@@ -495,7 +509,7 @@ gc 2	第二个 GC 周期
 3	标记结束时，标记为存活的对象大小
 5	标记结束时，堆的大小的预测值
 12	P 的数量
-
+```
 
 wall clock 是指开始执行到完成所经历的实际时间，包括其他程序和本程序所消耗的时间； cpu time 是指特定程序使用 CPU 的时间； 他们存在以下关系：
 
@@ -506,6 +520,7 @@ wall clock > cpu time: 多核优势不明显
 
 对于运行时向操作系统申请内存产生的垃圾回收（向操作系统归还多余的内存）：
 
+```
 scvg: 8 KB released
 scvg: inuse: 3, idle: 60, sys: 63, released: 57, consumed: 6 (MB)
 含义由下表所示：
@@ -517,10 +532,12 @@ scvg: inuse: 3, idle: 60, sys: 63, released: 57, consumed: 6 (MB)
 63	通知操作系统中保留的内存大小（MB）
 57	已经归还给操作系统的（或者说还未正式申请）的内存大小（MB）
 6	已经从操作系统中申请的内存大小（MB）
+```
 
 ### go tool trace 
 go tool trace 的主要功能是将统计而来的信息以一种可视化的方式展示给用户。
 
+```
 package main
 
 runtime/trace 包
@@ -532,7 +549,7 @@ func main() {
 	defer trace.Stop()
 	(...)
 }
-
+```
 go tool trace trace.out
 
 
@@ -590,6 +607,7 @@ func main() {
 
 当有一个全局对象时，可能不经意间将某个变量附着在其上，且忽略的将其进行释放，则该内存永远不会得到释放。例如：
 
+```
 var cache = map[interface{}]interface{}{}
 
 func keepalloc() {
@@ -598,11 +616,13 @@ func keepalloc() {
 		cache[i] = m
 	}
 }
+```
 
 ### 形式2：goroutine 泄漏
 
 Goroutine 作为一种逻辑上理解的轻量级线程，需要维护执行用户代码的上下文信息。在运行过程中也需要消耗一定的内存来保存这类信息，而这些内存在目前版本的 Go 中是不会被释放的。因此，如果一个程序持续不断地产生新的 goroutine、且不结束已经创建的 goroutine 并复用这部分内存，就会造成内存泄漏的现象，例如：
 
+```
 func keepalloc2() {
 	for i := 0; i < 100000; i++ {
 		go func() {
@@ -610,6 +630,7 @@ func keepalloc2() {
 		}()
 	}
 }
+```
 
 channel 的泄漏本质上与 goroutine 泄漏存在直接联系。Channel 作为一种同步原语，会连接两个不同的 goroutine，如果一个 goroutine 尝试向一个没有接收方的无缓冲 channel 发送消息，则该 goroutine 会被永久的休眠，整个 goroutine 及其执行栈都得不到释放，例如：
 
@@ -633,6 +654,7 @@ func keepalloc3() {
 可以证明，当以下两个条件同时满足时会破坏垃圾回收器的正确性：
 
 条件 1: 赋值器修改对象图，导致某一黑色对象引用白色对象；
+
 条件 2: 从灰色对象出发，到达白色对象的、未经访问过的路径被赋值器破坏。
 只要能够避免其中任何一个条件，则不会出现对象丢失的情况，因为：
 
@@ -680,10 +702,10 @@ Go 语言中对 GC 的触发时机存在两种形式：
 
 ## go gc 如何调优
 
-CPU 利用率：回收算法会在多大程度上拖慢程序？有时候，这个是通过回收占用的 CPU 时间与其它 CPU 时间的百分比来描述的。
-GC 停顿时间：回收器会造成多长时间的停顿？目前的 GC 中需要考虑 STW 和 Mark Assist 两个部分可能造成的停顿。
-GC 停顿频率：回收器造成的停顿频率是怎样的？目前的 GC 中需要考虑 STW 和 Mark Assist 两个部分可能造成的停顿。
-GC 可扩展性：当堆内存变大时，垃圾回收器的性能如何？但大部分的程序可能并不一定关心这个问题。
+- CPU 利用率：回收算法会在多大程度上拖慢程序？有时候，这个是通过回收占用的 CPU 时间与其它 CPU 时间的百分比来描述的。
+- GC 停顿时间：回收器会造成多长时间的停顿？目前的 GC 中需要考虑 STW 和 Mark Assist 两个部分可能造成的停顿。
+- GC 停顿频率：回收器造成的停顿频率是怎样的？
+- GC 可扩展性：当堆内存变大时，垃圾回收器的性能如何？但大部分的程序可能并不一定关心这个问题。
 
 1、合理化内存分配的速度、提高赋值器的 CPU 利用率
 
@@ -803,6 +825,7 @@ generate8191() 创建了大小为 8191 的 int 型切片，恰好小于 64 KB(64
 发生逃逸： generate(n)，切片大小不确定，调用时传入。
 
 2.4 闭包
+```
 func Increase() func() int {
 	n := 0
 	return func() int {
@@ -810,6 +833,7 @@ func Increase() func() int {
 		return n
 	}
 }
+```
 
 ## 利用逃逸分析提升性能
 
@@ -823,10 +847,11 @@ func Increase() func() int {
 
 pprof
 
+```
+
 import "net/http/pprof" // 可以分析 HTTP Server 服务
 import "runtime/pprof"
 其中 net/http/pprof 底层使用 runtime/pprof 包，只是进行了一下封装，并在 http 端口上暴露出来。
-
 
 allocs	内存分配情况的采样信息	可以用浏览器打开，但可读性不高
 blocks	阻塞操作情况的采样信息	可以用浏览器打开，但可读性不高
@@ -837,7 +862,7 @@ mutex	锁争用情况的采样信息	可以用浏览器打开，但可读性不�
 profile	CPU 占用情况的采样信息	浏览器打开会下载文件
 threadcreate	系统线程创建情况的采样信息	可以用浏览器打开，但可读性不高
 trace	程序运行跟踪信息	浏览器打开会下载文件，本文不涉及，可另行参阅 深入浅出 Go trace
-
+```
 
 报告生成、Web 可视化界面、交互式终端三种方式
 

@@ -142,12 +142,15 @@ CPU 在进程间切换
 进程会被加到作业队列中，该队列包括系统中的所有进程。
 驻留在内存中就绪的、等待运行的进程保存在就绪队列中。该队列通常用 PCB 的链表来实现。
 
+
 linux 中的 PCB 实现：task_struct
+```
 pid_t pid                               process identifier
 long state                              state of the process
 unsigned int time_slice                 Scheduling information
 struct files_struct \*files；        	list of open files
 struct mm_struct \*mm              		address space of this process
+```
 
 ![图](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/WX20240109-170501.png)
 
