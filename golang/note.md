@@ -930,6 +930,15 @@ atomic包提供了底层的原子性内存原语，这对于同步算法的实�
 
 
 ## mutex 互斥锁的实现原理
+
+Go mutex（互斥锁）的原理主要涉及状态标识、上锁和解锁过程、阻塞和唤醒机制、自旋和CAS操作，以及饥饿模式。1
+
+Go mutex的实现基于简单的状态机，通过一个状态值来标识锁的状态。例如，取0表示未加锁，1表示已加锁。上锁时，将状态值从0改为1；解锁时，将状态值从1改为0。如果一个goroutine尝试上锁时，锁的状态已经是1，则上锁失败，需要等待其他goroutine解锁。
+
+Go mutex的实现还包含阻塞和唤醒机制。当一个goroutine尝试上锁但失败时，它会阻塞自己，直到锁被释放。释放锁时，会以回调的方式唤醒被阻塞的goroutine，使其重新尝试获取锁。此外，Go mutex还包含自旋和CAS操作。自旋是一种乐观的策略，通过重复尝试获取锁来避免阻塞。如果自旋多次后仍然无法获取锁，则切换到阻塞模式。CAS操作用于原子地更新锁的状态。Go mutex还包含饥饿模式，这是为了解决非公平机制可能导致某些goroutine长时间无法获取锁的问题。
+
+
+
 In the terminology of the Go memory model, the n'th call to Unlock “synchronizes before” the m'th call to Lock for any n < m. A successful call to TryLock is equivalent to a call to Lock. A failed call to TryLock does not establish any “synchronizes before” relation at all.
 
 锁定的互斥锁不与特定的 goroutine 关联。 允许一个 Goroutine 锁定一个 Mutex，然后安排另一个 Goroutine 解锁它。

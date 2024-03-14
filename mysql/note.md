@@ -436,12 +436,54 @@ Some queries can be greatly optimized in virtue of the fact that data satisfying
 
 跨节点join，排序，分页的问题
 
-
 ## 高可用，分布式扩展
 
 
-
 ## 复制、备份与恢复
+
+复制使数据能够从一台 MySQL 数据库服务器（称为源）复制到一台或多台 MySQL 数据库服务器（称为副本）。复制默认是异步的；
+
+mysql 8.0 支持不同的复制方法：
+1. 传统方法基于从源二进制日志复制事件
+2. 基于全局事务标识符(GTID) 
+
+MySQL 8.0除了内置的异步复制之外，还支持半同步复制。
+通过半同步复制，在返回到执行事务的会话之前对源块执行提交，直到至少一个副本确认它已接收并记录事务的事件。
+
+MySQL 8.0 还支持延迟复制，即副本故意落后于源至少指定的时间；
+
+复制格式有两种核心类型：基于语句的复制 (SBR)，它复制整个 SQL 语句；以及基于行的复制 (RBR)，它仅复制更改的行。您还可以使用第三种，即基于混合的复制 (MBR)。
+
+连接到源的每个副本都请求二进制日志的副本。也就是说，它从源中提取数据，而不是源将数据推送到副本。
+
+### 复制格式
+- 使用基于语句的二进制日志记录时，源将 SQL 语句写入二进制日志。通过在副本上执行 SQL 语句将源复制到副本。这称为 基于语句的复制（可以缩写为 SBR），对应于 MySQL 基于语句的二进制日志记录格式。
+- 使用基于行的日志记录时，源会将 事件写入二进制日志，以指示各个表行的更改情况。将源复制到副本的工作方式是将表示表行更改的事件复制到副本。这称为基于行的复制（可以缩写为 RBR）。 基于行的日志记录是默认方法。
+- 您还可以将 MySQL 配置为混合使用基于语句和基于行的日志记录，具体取决于哪一种最适合记录更改。这称为 混合格式日志记录。使用混合格式日志记录时，默认使用基于语句的日志。根据某些语句以及所使用的存储引擎，日志在特定情况下会自动切换为基于行。
+
+binlog_format：MIXED,STATEMENT,ROW
+
+基于语句的复制
+
+优点:写入日志文件的数据较少。日志文件包含进行任何更改的所有语句
+缺点：依赖于不确定的可加载函数或存储程序的语句，
+DELETE and UPDATE statements that use a LIMIT clause without an ORDER BY are nondeterministic（不确定性的）. 
+Locking read statements
+
+LOAD_FILE()
+UUID(), UUID_SHORT()
+USER()
+SYSDATE() (unless both the source and the replica are started with the --sysdate-is-now option)
+RAND()
+VERSION()
+
+
+row-based 复制
+
+所有更改都可以复制。这是最安全的复制形式。
+
+
+
 
 ## 乐观锁 悲观锁
 
