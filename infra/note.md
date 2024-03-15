@@ -66,13 +66,65 @@ CAP 原理：分布式系统无法同时确保一致性（Consistency）、可�
 两阶段的提交算法，某些关系型数据库以及 ZooKeeper 主要考虑了这种设计。
 
 
-二阶段提交：
+# 分布式事务
+
+https://icyfenix.cn/architect-perspective/general-architecture/transaction/distributed.html
+
+## 二阶段提交：
 因此，二阶段提交的算法思路可以概括为：参与者将操作成败通知协调者，再由协调者根据所有参与者的反馈情况决定各参与者是要提交操作还是中止操作。
 
 两个阶段是指：
 第一阶段：准备阶段(投票阶段voting phase)
 第二阶段：提交阶段(执行阶段commit phase)
 
+该协议由两个阶段组成：
+
+提交请求阶段（或投票阶段），其中协调程序进程尝试准备所有事务的参与进程（指定的参与者、队列或工作人员），以采取必要的步骤来提交或中止事务并进行投票“是”：提交（如果事务参与者的本地部分执行已正确结束），或“否”：中止（如果检测到本地部分存在问题），
+
+提交阶段，协调者根据参与者的投票决定是否提交（仅当所有人都投“是”时）或中止事务（否则），并将结果通知所有参与者。然后，参与者使用其本地事务资源（也称为可恢复资源；例如数据库数据）以及事务的其他输出（如果适用）中的相应部分来执行所需的操作（提交或中止）。
+
+
+Commit request (or voting) phase
+The coordinator sends a query to commit message to all participants and waits until it has received a reply from all participants.
+The participants execute the transaction up to the point where they will be asked to commit. They each write an entry to their undo log and an entry to their redo log.
+Each participant replies with an agreement message (participant votes Yes to commit), if the participant's actions succeeded, or an abort message (participant votes No to commit), if the participant experiences a failure that will make it impossible to commit.
+Commit (or completion) phase
+
+Success
+If the coordinator received an agreement message from all participants during the commit-request phase:
+
+The coordinator sends a commit message to all the participants.
+Each participant completes the operation, and releases all the locks and resources held during the transaction.
+Each participant sends an acknowledgement to the coordinator.
+The coordinator completes the transaction when all acknowledgements have been received.
+
+
+Failure
+If any participant votes No during the commit-request phase (or the coordinator's timeout expires):
+
+The coordinator sends a rollback message to all the participants.
+Each participant undoes the transaction using the undo log, and releases the resources and locks held during the transaction.
+Each participant sends an acknowledgement to the coordinator.
+The coordinator undoes the transaction when all acknowledgements have been received.
+
+
+缺点：
+
+两阶段提交协议的最大缺点是它是一个阻塞协议。
+如果协调器永久失败，某些参与者将永远无法解决其事务：在参与者发送协议消息作为对协调器提交请求消息的响应之后，它将阻塞，直到收到提交或回滚。
+两阶段提交协议无法在提交阶段从协调器和队列成员的故障中可靠地恢复。
+
+
+## TCC 事务 Try-Confirm-Cancel
+
+- Try：尝试执行阶段，完成所有业务可执行性的检查（保障一致性），并且预留好全部需用到的业务资源（保障隔离性）。
+- Confirm：确认执行阶段，不进行任何业务检查，直接使用 Try 阶段准备的资源来完成业务处理。Confirm 阶段可能会重复执行，因此本阶段所执行的操作需要具备幂等性。
+- Cancel：取消执行阶段，释放 Try 阶段预留的业务资源。Cancel 阶段可能会重复执行，也需要满足幂等性。
+
+![图](https://raw.githubusercontent.com/wanlerong/tech-notes/master/imgs/screenshot-20240315-113628.png)
+
+
+由上述操作过程可见，TCC 其实有点类似 2PC 的准备阶段和提交阶段，但 TCC 是位于用户代码层面，而不是在基础设施层面，这为它的实现带来了较高的灵活性，可以根据需要设计资源锁定的粒度。TCC 在业务执行时只操作预留资源，几乎不会涉及锁和资源的争用，具有很高的性能潜力。但是 TCC 并非纯粹只有好处，它也带来了更高的开发成本和业务侵入性，意味着有更高的开发成本和更换事务实现方案的替换成本，所以，通常我们并不会完全靠裸编码来实现 TCC，而是基于某些分布式事务中间件（譬如阿里开源的Seata）
 
 
 # 高并发
